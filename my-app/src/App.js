@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import styles from './App.module.css';
 import { TodoInput } from './components/TodoInput';
 import { TodoList } from './components/TodoList';
+import { ref, onValue, push, remove, update } from 'firebase/database';
+import { db } from './firebase';
 
 export const App = () => {
 	const [todos, setTodos] = useState([]);
@@ -11,12 +13,21 @@ export const App = () => {
 	const [sortedTodos, setSortedTodos] = useState([]);
 	const [editableTodoId, setEditableTodoId] = useState(null);
 	const [editedTodoText, setEditedTodoText] = useState('');
+	const [originalTodos, setOriginalTodos] = useState([]);
 
 	useEffect(() => {
-		fetch('http://localhost:3001/todos')
-			.then((response) => response.json())
-			.then((data) => setTodos(data))
-			.catch((error) => console.error(error));
+		const todoRef = ref(db, 'todos');
+		onValue(todoRef, (snapshot) => {
+			const data = snapshot.val();
+			if (data) {
+				const todosArray = Object.keys(data).map((key) => ({ id: key, text: data[key].text }));
+				setTodos(todosArray);
+				setOriginalTodos(todosArray);
+			} else {
+				setTodos([]);
+				setOriginalTodos([]);
+			}
+		});
 	}, []);
 
 	useEffect(() => {
@@ -29,39 +40,19 @@ export const App = () => {
 	}, [sortByAlphabet, todos]);
 
 	const addTodo = () => {
-		fetch('http://localhost:3001/todos', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json;charset=utf-8',
-			},
-			body: JSON.stringify({ text: newTodo }),
-		})
-			.then((response) => response.json())
-			.then((data) => {
-				setTodos([...todos, data]);
+		const todoRef = ref(db, 'todos');
+		push(todoRef, { text: newTodo })
+			.then((newTodoRef) => {
+				const newTodoId = newTodoRef.key;
+				setTodos([...todos, { id: newTodoId, text: newTodo }]);
 				setNewTodo('');
 			})
 			.catch((error) => console.error(error));
 	};
 
-	const deleteTodo = (id) => {
-		fetch(`http://localhost:3001/todos/${id}`, {
-			method: 'DELETE',
-		})
-			.then((response) => {
-				if (response.ok) {
-					const updatedTodos = todos.filter((todo) => todo.id !== id);
-					setTodos(updatedTodos);
-				}
-			})
-			.catch((error) => console.error(error));
-	};
-
 	const handleSearch = () => {
-		fetch(`http://localhost:3001/todos?q=${searchTerm}`)
-			.then((response) => response.json())
-			.then((data) => setTodos(data))
-			.catch((error) => console.error(error));
+		const filteredTodos = originalTodos.filter((todo) => todo.text.toLowerCase().includes(searchTerm.toLowerCase()));
+		setTodos(filteredTodos);
 	};
 
 	const startEdit = (id, text) => {
@@ -70,20 +61,23 @@ export const App = () => {
 	};
 
 	const saveEdit = () => {
-		fetch(`http://localhost:3001/todos/${editableTodoId}`, {
-			method: 'PUT',
-			headers: {
-				'Content-Type': 'application/json;charset=utf-8',
-			},
-			body: JSON.stringify({ text: editedTodoText }),
-		})
-			.then((response) => {
-				if (response.ok) {
-					const updatedTodos = todos.map((todo) => (todo.id === editableTodoId ? { ...todo, text: editedTodoText } : todo));
-					setTodos(updatedTodos);
-					setEditableTodoId(null);
-					setEditedTodoText('');
-				}
+		const todoRef = ref(db, `todos/${editableTodoId}`);
+		update(todoRef, { text: editedTodoText })
+			.then(() => {
+				const updatedTodos = todos.map((todo) => (todo.id === editableTodoId ? { ...todo, text: editedTodoText } : todo));
+				setTodos(updatedTodos);
+				setEditableTodoId(null);
+				setEditedTodoText('');
+			})
+			.catch((error) => console.error(error));
+	};
+
+	const deleteTodo = (id) => {
+		const todoRef = ref(db, `todos/${id}`);
+		remove(todoRef)
+			.then(() => {
+				const updatedTodos = todos.filter((todo) => todo.id !== id);
+				setTodos(updatedTodos);
 			})
 			.catch((error) => console.error(error));
 	};
